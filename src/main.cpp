@@ -62,9 +62,8 @@ String message;
 
 
 // RFID
-#define RST_PIN       18          // Configurable, see typical pin layout above
+#define RST_PIN       15          // Configurable, see typical pin layout above
 #define SS_PIN        5         // Configurable, take a unused pin, only HIGH/LOW required, must be different to SS 2
-
 #define NR_OF_READERS   1
 
 MFRC522 rfid(SS_PIN, RST_PIN); // Instance of the class
@@ -73,6 +72,19 @@ MFRC522::MIFARE_Key key;
 // Init array that will store new NUID 
 byte nuidPICC[4];
 
+String tarjetaRFIDLeida;
+
+
+
+void initRFID(){
+  Serial.println(F("Initialize RFID System"));
+
+  SPI.begin();
+  rfid.PCD_Init();
+
+  Serial.print(F("Reader :"));
+  rfid.PCD_DumpVersionToSerial();
+}
 
 U8G2_SSD1306_128X32_UNIVISION_1_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 const char COPYRIGHT_SYMBOL[] = {0xa9, '\0'};
@@ -251,8 +263,10 @@ void setup() {
   pinMode(LEDWIFI, OUTPUT);
   pinMode(LEDFIREBASE, OUTPUT);
 
-  // Initialize WiFi
+  // Inicio RFID
+  initRFID();
 
+  // Initialize WiFi
   initWiFi();
 
   WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
@@ -308,7 +322,75 @@ void setup() {
 
 }
 
+void printDec(byte *buffer, byte bufferSize) {
+  String tarjetaRFID;
+
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+    Serial.print(buffer[i], DEC);
+
+    tarjetaRFID += buffer[i];
+  }
+
+  Serial.println();
+  Serial.print(tarjetaRFID);
+}
+
+void printHex(byte *buffer, byte bufferSize) {
+  tarjetaRFIDLeida = "";
+
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+    Serial.print(buffer[i], HEX);
+
+    tarjetaRFIDLeida += String(buffer[i], HEX);
+  }
+
+  for (int i = 0; i < tarjetaRFIDLeida.length(); i++) {tarjetaRFIDLeida[i] = toupper(tarjetaRFIDLeida[i]);}
+
+  Serial.println();
+  Serial.print(tarjetaRFIDLeida);
+}
+
+void readRFID(){
+  // Look for new 1 cards
+  if ( ! rfid.PICC_IsNewCardPresent())
+    return;
+
+  // Verify if the NUID has been readed
+  if (  !rfid.PICC_ReadCardSerial())
+    return;
+
+  // Se comprueba el tipo de tarjeta RFID
+  Serial.print(F("PICC type: "));
+  MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
+  Serial.println(rfid.PICC_GetTypeName(piccType));
+
+
+    // Store NUID into nuidPICC array
+  for (byte i = 0; i < 4; i++) {
+    nuidPICC[i] = rfid.uid.uidByte[i];
+  }
+
+  Serial.print(F("RFID In dec: "));
+  printDec(rfid.uid.uidByte, rfid.uid.size);
+  Serial.println();
+  printHex(rfid.uid.uidByte, rfid.uid.size);
+  Serial.println();
+
+  escribeTextoOled(tarjetaRFIDLeida);
+
+  // Halt PICC
+  rfid.PICC_HaltA();
+
+  // Stop encryption on PCD
+  rfid.PCD_StopCrypto1();
+}
+
 void loop() {
+
+  readRFID();
+
   // put your main code here, to run repeatedly:
   // Se comenta para que se encienda desde FireBase
   /*digitalWrite(LED, HIGH);
