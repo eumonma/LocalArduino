@@ -12,6 +12,10 @@
 
 #include "Credentials.h"
 
+// Almacenamiento de datos permanentes
+#include <Preferences.h>
+Preferences preferences;
+
 #define LED 2
 #define LEDWIFI 0
 #define LEDFIREBASE 4
@@ -60,6 +64,7 @@ const int output2 = 4; // 12
 // Variable to save input message
 String message;
 
+String ubicacionESP;
 
 // RFID
 #define RST_PIN       15          // Configurable, see typical pin layout above
@@ -121,8 +126,12 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info){
   Serial.println("Disconnected from WiFi access point");
   Serial.print("WiFi lost connection. Reason: ");
   Serial.println(info.wifi_sta_disconnected.reason);
-  Serial.println("Trying to Reconnect");
-  initWiFi();
+
+  Serial.println("Reboot");
+  // Restart ESP
+  ESP.restart();
+
+  //initWiFi();
 }
 
 
@@ -252,6 +261,55 @@ void streamTimeoutCallback(bool timeout){
     Serial.printf("Error code: %d, reason: %s\n\n", stream.httpCode(), stream.errorReason().c_str());
 }
 
+
+void obtenerUbicacionESP(){
+  preferences.begin("dispositivo", false);
+  ubicacionESP = preferences.getString("ubicacion", "null");
+
+  if (ubicacionESP == "null"){
+    int cont = 0;
+    String pathUbicacion = databasePath + "/ubicacion";
+    // buscar la ubicación en Firebase
+    Serial.println("BUSCANDO UBICACION en Firebase:");
+    Serial.println(pathUbicacion);
+
+    while (cont <=60 && ubicacionESP != "null"){
+      // Se consulta en Firebase RTDB si tiene nombre
+
+      if (Firebase.RTDB.getString(&fbdo, pathUbicacion.c_str())){
+        Serial.println("UBICACION: ");
+        ubicacionESP = fbdo.to<const char *>();
+        //Serial.println(fbdo.to<const char *>());
+        Serial.println(ubicacionESP);
+        preferences.putString("ubicacion", ubicacionESP);
+      }
+      else{
+        Serial.println("FAILED");
+        Serial.println("REASON: " + fbdo.errorReason());
+      }
+
+      delay(5000); // Se espera 5 segs antes de la siguiente petición
+      cont++;
+    }
+    // Si se sale y aún no tiene nombre, se resetea el dispositivo
+    if (ubicacionESP == "null"){
+      ESP.restart();
+    }else{
+      // Se guarda la ubicación en memoria permanente y se utiliza en las rutas de Firebase
+      Serial.println("******* UBICACION OBTENIDA ********");
+    }
+  }
+  else{
+    Serial.println("La Ubicacion es: ");
+    Serial.println(ubicacionESP);
+  }
+
+}
+
+void obtenerRFIDautorizadas(){
+  Serial.println("Obtener las RFIDs autorizadas")
+}
+
 void setup() {
 
   u8g2.begin();
@@ -301,6 +359,7 @@ void setup() {
   Serial.print("User UID: ");
   Serial.print(uid);
 
+
   // Update database path
   databasePath = "/UsersData/" + uid;
   // Define database path for sensor readings
@@ -311,6 +370,14 @@ void setup() {
 
   // Update database path for listener
   listenerPath = databasePath + "/outputs/";
+
+
+  // Obtiene donde está ubicado el dispositivo.
+  // Si no tiene, no avanza hasta que en la RTDB se indica donde está
+
+  obtenerUbicacionESP();
+  obtenerRFIDautorizadas();
+
 
   // Streaming (whenever data changes on a path)
   // Begin stream on a database path --> UserData/<user_id>/outputs
