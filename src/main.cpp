@@ -5,7 +5,6 @@
 #include <U8g2lib.h>
 #include <Wire.h>
 
-
 //RFID
 #include <SPI.h>
 #include <MFRC522.h>
@@ -31,6 +30,13 @@ DHT dht(DHTPIN, DHTTYPE);
 #include "addons/TokenHelper.h"
 // Provide the RTDB payload printing info and other helper functions.
 #include "addons/RTDBHelper.h"
+
+
+#include "time.h"
+//const long gmtOffset_sec = 3600; // UTC: Epaña UTC + 1
+//const int daylightOffset_sec = 3600;
+const long gmtOffset_sec = 0; // UTC: Epaña UTC + 1
+const int daylightOffset_sec = 0;
 
 
 // Define Firebase objects
@@ -83,6 +89,11 @@ byte nuidPICC[4];
 String tarjetaRFIDLeida;
 
 
+// Tiempo Timestamp
+int timestamp;
+const char* ntpServer = "pool.ntp.org";
+String sTimestamp;
+char cTimestamp[20];
 
 void initRFID(){
 	Serial.println(F("Initialize RFID System"));
@@ -118,6 +129,37 @@ void initWiFi() {
 }
 
 
+// Function that gets current epoch time
+unsigned long getTime() {
+  char fecha[11];
+  char hora[9];
+
+  time_t now;
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    Serial.println("Failed to obtain time");
+    return(0);
+  }
+
+  // "2014-10-02T15:01:23Z"); // RFC3339 UTC "Zulu" format
+
+  strftime(fecha, 11, "%F", &timeinfo); //  YYYY-MM-DD  https://cplusplus.com/reference/ctime/strftime/
+  strftime(hora, 9, "%T", &timeinfo); // HH:MM:SS
+  //sTimestamp = fecha + "T" + hora + "Z";
+
+  	sTimestamp = String(fecha) + "T" + String(hora) + "Z";
+//	strcat(cTimestamp, "T");
+//	strcat(cTimestamp, hora);
+//	strcat(cTimestamp, "Z");
+
+	Serial.println();
+	Serial.print(F("Fecha: "));
+	Serial.println(sTimestamp.c_str());
+
+  time(&now);
+  return now;
+}
+
 // Escribe el texto pasado en la pantalla OLED
 void escribeTextoOled(String texto){
 	u8g2.clearBuffer();
@@ -145,6 +187,26 @@ void firestoreDataUpdate(String tag){
 
 }
 
+void firestoreWriteLog(String tag){
+	firestorePathTags = "logs/" + String(timestamp);
+
+
+	FirebaseJson	contenido;
+
+	contenido.set("fields/cod_tag/stringValue", tag.c_str());
+	contenido.set("fields/permitido/booleanValue", false);
+	contenido.set("fields/timestamp/timestampValue", String(sTimestamp));
+//	contenido.set("fields/timestamp/stringValue", String(timestamp));
+	contenido.set("fields/esp/stringValue", ubicacionESP);
+	
+	if(Firebase.Firestore.createDocument(&fbdo, FIREBASE_PROJECT_ID, "", firestorePathTags.c_str(), contenido.raw())){
+		Serial.printf("ok\n%s\n\n", fbdo.payload().c_str());
+		return;
+	}else{
+		Serial.println(fbdo.errorReason());
+	}
+
+}
 void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info){
 	digitalWrite(LEDWIFI, LOW);
 	Serial.println("Disconnected from WiFi access point");
@@ -353,6 +415,8 @@ void setup() {
 
 	WiFi.onEvent(WiFiStationDisconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
+	// Para configurar el TimeStamp
+	configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
 
 	// Assign the api key (required)
@@ -471,7 +535,13 @@ void readRFID(){
 	printHex(rfid.uid.uidByte, rfid.uid.size);
 	Serial.println();
 
+
+    //Get current timestamp
+    timestamp = getTime();
+
+
 	escribeTextoOled(tarjetaRFIDLeida);
+	firestoreWriteLog(tarjetaRFIDLeida);
 	firestoreDataUpdate(tarjetaRFIDLeida);
 
 	// Halt PICC
